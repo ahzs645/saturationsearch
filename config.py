@@ -13,6 +13,9 @@ ZOTERO_API_KEY = os.getenv('ZOTERO_API_KEY')
 ZOTERO_LIBRARY_ID = os.getenv('ZOTERO_LIBRARY_ID')
 ZOTERO_LIBRARY_TYPE = os.getenv('ZOTERO_LIBRARY_TYPE', 'group')
 
+# Zotero Mode Configuration
+ZOTERO_USE_LOCAL = os.getenv('ZOTERO_USE_LOCAL', 'false').lower() == 'true'
+
 # Search Configuration
 DEFAULT_DATE_START = "1930-01-01"
 DEFAULT_LANGUAGE = "English"

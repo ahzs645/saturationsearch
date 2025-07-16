@@ -9,7 +9,7 @@ from datetime import datetime
 import json
 from pyzotero import zotero
 
-from config import ZOTERO_API_KEY, ZOTERO_LIBRARY_ID, ZOTERO_LIBRARY_TYPE
+from config import ZOTERO_API_KEY, ZOTERO_LIBRARY_ID, ZOTERO_LIBRARY_TYPE, ZOTERO_USE_LOCAL
 
 logger = logging.getLogger(__name__)
 
@@ -27,25 +27,39 @@ class ZoteroManager:
     def __init__(self, 
                  library_id: str = None,
                  api_key: str = None,
-                 library_type: str = None):
+                 library_type: str = None,
+                 use_local: bool = None):
         """
         Initialize Zotero manager.
         
         Args:
             library_id (str): Zotero library ID
-            api_key (str): Zotero API key
+            api_key (str): Zotero API key (required for online mode only)
             library_type (str): Library type ('user' or 'group')
+            use_local (bool): If True, use local Zotero database. If False, use online API.
         """
         self.library_id = library_id or ZOTERO_LIBRARY_ID
         self.api_key = api_key or ZOTERO_API_KEY
         self.library_type = library_type or ZOTERO_LIBRARY_TYPE
+        self.use_local = use_local if use_local is not None else ZOTERO_USE_LOCAL
         
-        if not all([self.library_id, self.api_key]):
-            raise ValueError("Zotero library ID and API key are required")
+        # Validate required parameters based on mode
+        if self.use_local:
+            if not self.library_id:
+                raise ValueError("Zotero library ID is required for local mode")
+            logger.info("Using local Zotero database")
+        else:
+            if not all([self.library_id, self.api_key]):
+                raise ValueError("Zotero library ID and API key are required for online mode")
+            logger.info("Using online Zotero API")
         
         try:
-            self.zot = zotero.Zotero(self.library_id, self.library_type, self.api_key)
-            logger.info(f"Connected to Zotero {self.library_type} library: {self.library_id}")
+            if self.use_local:
+                self.zot = zotero.Zotero(self.library_id, self.library_type, local=True)
+                logger.info(f"Connected to local Zotero {self.library_type} library: {self.library_id}")
+            else:
+                self.zot = zotero.Zotero(self.library_id, self.library_type, self.api_key)
+                logger.info(f"Connected to online Zotero {self.library_type} library: {self.library_id}")
         except Exception as e:
             logger.error(f"Failed to connect to Zotero: {e}")
             raise
@@ -80,14 +94,20 @@ class ZoteroManager:
                     collection_ids[collection_name] = existing_names[collection_name]
                     logger.info(f"Using existing collection: {collection_name}")
                 else:
-                    # Create new collection
-                    collection_data = {
+                    # Create new collection using create_collections method directly
+                    collection_data = [{
                         'name': collection_name,
-                        'description': description
-                    }
+                        'parentCollection': ""
+                    }]
                     
-                    result = self.zot.create_collection(collection_data)
-                    collection_ids[collection_name] = result['key']
+                    result = self.zot.create_collections(collection_data)
+                    if isinstance(result, list) and len(result) > 0 and 'key' in result[0]:
+                        collection_ids[collection_name] = result[0]['key']
+                    elif isinstance(result, dict) and 'key' in result:
+                        collection_ids[collection_name] = result['key']
+                    else:
+                        logger.error(f"Unexpected result format: {result}")
+                        raise ValueError(f"Failed to get collection key from result: {result}")
                     logger.info(f"Created collection: {collection_name}")
                     
             except Exception as e:
