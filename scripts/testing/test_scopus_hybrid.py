@@ -5,7 +5,8 @@ Test script for the hybrid Scopus API integration.
 
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+# Add project root to path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from src.api.scopus_hybrid import ScopusHybridAPI
 from config import SCOPUS_API_KEY

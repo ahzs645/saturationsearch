@@ -5,7 +5,8 @@ Test script for the new Web of Science Starter API integration.
 
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+# Add project root to path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from src.api.web_of_science_starter import WebOfScienceStarterAPI
 from config import WOS_API_KEY
