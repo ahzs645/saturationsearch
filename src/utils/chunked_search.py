@@ -10,6 +10,7 @@ import math
 
 from .location_terms import (
     ENHANCED_NECHAKO_LOCATION_TERMS,
+    REGIONAL_FILTER_TERMS,
     generate_accent_variants,
     generate_watercourse_variants,
     canonicalize

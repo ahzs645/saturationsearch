@@ -74,90 +74,56 @@ class WebOfScienceStarterAPI:
             logger.error(f"API key validation error: {e}")
             return False
     
-    def build_nechako_query(self, 
+    def build_nechako_query(self,
                            use_priority_terms: bool = False,
                            date_start: str = "1930-01-01",
                            date_end: Optional[str] = None) -> str:
         """
-        Build a Web of Science query for Nechako Watershed research.
-        
+        Build a Web of Science query matching Terry's search structure:
+          Line 7: TS=(all geographic terms OR'd together)
+          Line 8: ("British Columbia" OR "Canada") in all fields
+          Line 9: Line 7 AND Line 8
+
+        No theme/topic filter — Terry's original search doesn't use one.
+
         Args:
             use_priority_terms (bool): Use priority location terms only
             date_start (str): Start date (YYYY-MM-DD)
             date_end (str): End date (YYYY-MM-DD, defaults to current year)
-            
+
         Returns:
             str: Web of Science query string
         """
+        from utils.location_terms import (
+            build_comprehensive_location_query, REGIONAL_FILTER_TERMS
+        )
+
         if date_end is None:
             date_end = str(datetime.now().year)
         else:
             date_end = date_end.split('-')[0]  # Extract year
-        
+
         date_start_year = date_start.split('-')[0]  # Extract year
-        
-        # Location terms for Nechako Watershed
-        if use_priority_terms:
-            location_terms = [
-                "Nechako",
-                "Fraser River",
-                "British Columbia",
-                "Vanderhoof",
-                "Prince George"
-            ]
-        else:
-            # More comprehensive terms
-            location_terms = [
-                "Nechako",
-                "Fraser River", 
-                "British Columbia",
-                "Vanderhoof",
-                "Prince George",
-                "Blackwater River",
-                "Stuart River", 
-                "Nautley River",
-                "Endako River",
-                "Central Interior",
-                "BC Interior",
-                "Carrier Sekani"
-            ]
-        
-        # Build topic search (TS) for location terms
-        location_query = " OR ".join([f'"{term}"' for term in location_terms])
-        
-        # Core research themes related to watersheds
-        theme_terms = [
-            "watershed",
-            "hydrology", 
-            "water quality",
-            "aquatic ecosystem",
-            "fisheries",
-            "salmon",
-            "environmental assessment",
-            "water resources",
-            "river ecology",
-            "biodiversity",
-            "conservation",
-            "climate change",
-            "forestry",
-            "land use"
-        ]
-        
-        theme_query = " OR ".join([f'"{term}"' for term in theme_terms])
-        
-        # Combine location and theme searches
+
+        # Line 7: All specific geographic terms as Topic Search
+        location_query = build_comprehensive_location_query(use_priority_terms)
+
+        # Line 8: Regional filter in ALL fields (no TS= prefix)
+        regional_filter = " OR ".join([f'"{term}"' for term in REGIONAL_FILTER_TERMS])
+
+        # Line 9: Combine Line 7 AND Line 8 + date/language filters
         query_parts = [
             f"TS=({location_query})",
-            f"TS=({theme_query})",
+            f"({regional_filter})",
             f"PY=({date_start_year}-{date_end})"
         ]
-        
+
         # Add language filter if specified
         if DEFAULT_LANGUAGE and DEFAULT_LANGUAGE.lower() == "english":
             query_parts.append("LA=(English)")
-        
+
         query = " AND ".join(query_parts)
-        
+
         logger.info(f"Built query: {query[:200]}...")
         return query
     

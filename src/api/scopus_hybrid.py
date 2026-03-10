@@ -74,103 +74,59 @@ class ScopusHybridAPI:
                            date_start: str = "1930",
                            date_end: Optional[str] = None) -> str:
         """
-        Build a Scopus query for Nechako Watershed research.
-        
+        Build a Scopus query matching Terry's search structure:
+          Line 7: TITLE-ABS-KEY(all geographic terms OR'd together)
+          Line 8: ALL("British Columbia" OR "Canada") in all fields
+          Line 9: Line 7 AND Line 8
+
+        No theme/topic filter — Terry's original search doesn't use one.
+
         Args:
             use_priority_terms (bool): Use priority location terms only
             date_start (str): Start year (YYYY)
             date_end (str): End year (YYYY, defaults to current year)
-            
+
         Returns:
             str: Scopus query string
         """
+        from utils.location_terms import (
+            build_comprehensive_location_query, REGIONAL_FILTER_TERMS
+        )
+
         if date_end is None:
             date_end = str(datetime.now().year)
-        
+
         # Ensure we have years only
         if '-' in date_start:
             date_start = date_start.split('-')[0]
         if '-' in date_end:
             date_end = date_end.split('-')[0]
-        
-        # Location terms for Nechako Watershed
-        if use_priority_terms:
-            location_terms = [
-                "Nechako",
-                "Fraser River", 
-                "British Columbia",
-                "Vanderhoof",
-                "Prince George"
-            ]
-        else:
-            # More comprehensive terms
-            location_terms = [
-                "Nechako",
-                "Fraser River",
-                "British Columbia",
-                "Vanderhoof", 
-                "Prince George",
-                "Blackwater River",
-                "Stuart River",
-                "Nautley River",
-                "Endako River",
-                "Central Interior",
-                "BC Interior", 
-                "Carrier Sekani",
-                "Omineca",
-                "Bulkley Valley",
-                "Fort St. James",
-                "Burns Lake",
-                "Fraser Lake"
-            ]
-        
-        # Build location query using TITLE-ABS-KEY (searches title, abstract, and keywords)
-        location_parts = []
-        for term in location_terms:
-            location_parts.append(f'TITLE-ABS-KEY("{term}")')
+
+        # Line 7: All specific geographic terms as TITLE-ABS-KEY
+        location_query_raw = build_comprehensive_location_query(use_priority_terms)
+        location_terms_list = [term.strip('"') for term in location_query_raw.split(' OR ')]
+        location_parts = [f'TITLE-ABS-KEY("{term}")' for term in location_terms_list]
         location_query = " OR ".join(location_parts)
-        
-        # Core research themes related to watersheds
-        theme_terms = [
-            "watershed",
-            "hydrology",
-            "water quality",
-            "aquatic ecosystem", 
-            "fisheries",
-            "salmon",
-            "environmental assessment",
-            "water resources",
-            "river ecology",
-            "biodiversity",
-            "conservation",
-            "climate change",
-            "forestry",
-            "land use",
-            "First Nations",
-            "indigenous"
-        ]
-        
-        theme_parts = []
-        for term in theme_terms:
-            theme_parts.append(f'TITLE-ABS-KEY("{term}")')
-        theme_query = " OR ".join(theme_parts)
-        
-        # Combine queries
+
+        # Line 8: Regional filter in ALL fields (Scopus ALL() operator)
+        regional_filter = " OR ".join([f'"{term}"' for term in REGIONAL_FILTER_TERMS])
+
+        # Line 9: Combine Line 7 AND Line 8 + filters
         query_parts = [
             f"({location_query})",
-            f"({theme_query})",
+            f"ALL({regional_filter})",
             f"PUBYEAR > {int(date_start)-1} AND PUBYEAR < {int(date_end)+1}"
         ]
-        
+
         # Add language filter if specified
         if DEFAULT_LANGUAGE and DEFAULT_LANGUAGE.lower() == "english":
             query_parts.append('LANGUAGE(english)')
-        
+
         # Add document type filters (exclude non-research content)
-        query_parts.append('DOCTYPE(ar OR re OR cp OR ch)')  # Articles, reviews, conference papers, book chapters
-        
+        query_parts.append('DOCTYPE(ar OR re OR cp OR ch)')
+
         query = " AND ".join(query_parts)
-        
+
         logger.info(f"Built Scopus query: {query[:200]}...")
         return query
     

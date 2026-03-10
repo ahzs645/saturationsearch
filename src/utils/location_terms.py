@@ -189,12 +189,18 @@ ENHANCED_NECHAKO_LOCATION_TERMS = {
         "Upper Nechako", "Lower Nechako", "Middle Nechako"
     ],
     
-    # Primary watershed terms
+    # Primary watershed terms (specific to Nechako region only —
+    # broad terms like "British Columbia" and "Canada" are handled separately
+    # as an all-fields filter per Terry's search structure)
     "watershed_terms": [
         "Nechako", "Nechako Watershed", "Nechako Basin", "Nechako River System",
-        "Fraser River", "British Columbia", "BC Interior", "Central Interior"
+        "Fraser River"
     ]
 }
+
+# Line 8 terms: broad regional filter searched in ALL fields (not topic-limited)
+# Per Terry's search structure: Line 7 (geographic TS terms) AND Line 8 (all-fields regional)
+REGIONAL_FILTER_TERMS = ["British Columbia", "Canada"]
 
 # Synonym mappings for watercourse types
 WATERCOURSE_SYNONYMS = {
@@ -336,58 +342,55 @@ def build_comprehensive_location_query(use_priority_terms: bool = False) -> str:
     
     return query
 
-def build_web_of_science_query(use_priority_terms: bool = False, 
-                              date_start: str = "1930-01-01", 
+def build_web_of_science_query(use_priority_terms: bool = False,
+                              date_start: str = "1930-01-01",
                               date_end: str = "2023-12-31") -> str:
     """
-    Build Web of Science query with enhanced location terms.
+    Build Web of Science query matching Terry's search structure:
+      Line 7: TS=(all geographic terms OR'd together)
+      Line 8: ("British Columbia" OR "Canada") in all fields
+      Line 9: Line 7 AND Line 8
+
+    No theme/topic filter — Terry's search doesn't use one.
     """
     location_query = build_comprehensive_location_query(use_priority_terms)
-    
-    # Topic areas relevant to watershed research
-    topic_terms = [
-        "watershed", "hydrology", "water quality", "aquatic ecosystem", 
-        "fisheries", "salmon", "environmental assessment", "water resources", 
-        "river ecology", "biodiversity", "conservation", "climate change", 
-        "forestry", "land use", "First Nations", "indigenous"
-    ]
-    
-    topic_query = " OR ".join([f'"{term}"' for term in topic_terms])
-    
+
     # Convert date format for WoS
     start_year = date_start.split('-')[0]
     end_year = date_end.split('-')[0]
-    
-    query = f'TS=({location_query}) AND TS=({topic_query}) AND PY=({start_year}-{end_year}) AND LA=(English)'
-    
+
+    # Line 8: regional filter in all fields (no TS= prefix)
+    regional_filter = " OR ".join([f'"{term}"' for term in REGIONAL_FILTER_TERMS])
+
+    query = (f'TS=({location_query}) AND ({regional_filter}) '
+             f'AND PY=({start_year}-{end_year}) AND LA=(English)')
+
     return query
 
 def build_scopus_query(use_priority_terms: bool = False,
-                      date_start: str = "1930", 
+                      date_start: str = "1930",
                       date_end: str = "2023") -> str:
     """
-    Build Scopus query with enhanced location terms.
+    Build Scopus query matching Terry's search structure:
+      Line 7: TITLE-ABS-KEY(all geographic terms OR'd together)
+      Line 8: ALL("British Columbia" OR "Canada") in all fields
+      Line 9: Line 7 AND Line 8
+
+    No theme/topic filter — Terry's search doesn't use one.
     """
     location_query = build_comprehensive_location_query(use_priority_terms)
-    
+
     # Convert to Scopus format (TITLE-ABS-KEY)
-    location_terms = [term.strip('"') for term in location_query.split(' OR ')]
-    scopus_location = " OR ".join([f'TITLE-ABS-KEY("{term}")' for term in location_terms])
-    
-    # Topic terms for Scopus
-    topic_terms = [
-        "watershed", "hydrology", "water quality", "aquatic ecosystem",
-        "fisheries", "salmon", "environmental assessment", "water resources",
-        "river ecology", "biodiversity", "conservation", "climate change",
-        "forestry", "land use", "First Nations", "indigenous"
-    ]
-    
-    scopus_topics = " OR ".join([f'TITLE-ABS-KEY("{term}")' for term in topic_terms])
-    
-    query = (f'({scopus_location}) AND ({scopus_topics}) '
+    location_terms_list = [term.strip('"') for term in location_query.split(' OR ')]
+    scopus_location = " OR ".join([f'TITLE-ABS-KEY("{term}")' for term in location_terms_list])
+
+    # Line 8: regional filter in ALL fields (Scopus ALL() operator)
+    regional_filter = " OR ".join([f'"{term}"' for term in REGIONAL_FILTER_TERMS])
+
+    query = (f'({scopus_location}) AND ALL({regional_filter}) '
              f'AND PUBYEAR > {int(date_start)-1} AND PUBYEAR < {int(date_end)+1} '
              f'AND LANGUAGE(english) AND DOCTYPE(ar OR re OR cp OR ch)')
-    
+
     return query
 
 def get_location_terms_stats() -> Dict[str, int]:
