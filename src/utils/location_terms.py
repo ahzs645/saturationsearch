@@ -293,19 +293,23 @@ def generate_accent_variants(name: str) -> List[str]:
     
     return list(set(variants))
 
-def build_comprehensive_location_query(use_priority_terms: bool = False) -> str:
+def build_comprehensive_location_query(use_priority_terms: bool = False,
+                                       include_watercourse_variants: bool = False) -> str:
     """
-    Build a comprehensive location query with all terms and variants.
+    Build a comprehensive location query with all terms.
     Deduplicates across categories before building query.
-    
+
     Args:
         use_priority_terms: If True, use only highest priority terms
-        
+        include_watercourse_variants: If True, generate Creek/River/Brook/Stream
+            variants. Disabled by default to match Terry's original search
+            which uses exact names only.
+
     Returns:
         Query string for database searches
     """
     all_terms = set()
-    
+
     if use_priority_terms:
         # Priority terms - most important and frequently cited
         priority_categories = ["watershed_terms", "rivers", "populated_places", "physiography"]
@@ -313,33 +317,36 @@ def build_comprehensive_location_query(use_priority_terms: bool = False) -> str:
     else:
         # Use all categories
         categories_to_use = ENHANCED_NECHAKO_LOCATION_TERMS.keys()
-    
+
     # Collect terms from specified categories
     base_terms = set()
     for category in categories_to_use:
         if category in ENHANCED_NECHAKO_LOCATION_TERMS:
             for term in ENHANCED_NECHAKO_LOCATION_TERMS[category]:
                 base_terms.add(term)
-    
+
     # Generate variants for all base terms (this deduplicates automatically)
     for term in base_terms:
         # Add original term
         all_terms.add(term)
-        
-        # Add accent variants
+
+        # Add accent variants (important for François Lake etc.)
         for variant in generate_accent_variants(term):
             all_terms.add(variant)
-        
-        # Add watercourse variants if it looks like a watercourse
-        if any(suffix in term.lower() for suffix in ["creek", "river", "brook", "stream"]):
-            for variant in generate_watercourse_variants(term):
-                all_terms.add(variant)
-    
+
+        # Watercourse variants disabled by default — Terry's original search
+        # uses exact names (e.g., "Aird Creek" not "Aird River/Brook/Stream").
+        # Enabling this inflates results with worldwide matches.
+        if include_watercourse_variants:
+            if any(suffix in term.lower() for suffix in ["creek", "river", "brook", "stream"]):
+                for variant in generate_watercourse_variants(term):
+                    all_terms.add(variant)
+
     # Build query string from deduplicated terms
     unique_terms = sorted(list(all_terms))
     quoted_terms = [f'"{term}"' for term in unique_terms]
     query = " OR ".join(quoted_terms)
-    
+
     return query
 
 def build_web_of_science_query(use_priority_terms: bool = False,
@@ -359,8 +366,10 @@ def build_web_of_science_query(use_priority_terms: bool = False,
     start_year = date_start.split('-')[0]
     end_year = date_end.split('-')[0]
 
-    # Line 8: regional filter in all fields (no TS= prefix)
-    regional_filter = " OR ".join([f'"{term}"' for term in REGIONAL_FILTER_TERMS])
+    # Line 8: regional filter — WoS Starter API requires field tags,
+    # so we use TS + OG (Organization) to approximate all-fields search
+    regional_parts = " OR ".join([f'"{term}"' for term in REGIONAL_FILTER_TERMS])
+    regional_filter = f'TS=({regional_parts}) OR OG=({regional_parts})'
 
     query = (f'TS=({location_query}) AND ({regional_filter}) '
              f'AND PY=({start_year}-{end_year}) AND LA=(English)')

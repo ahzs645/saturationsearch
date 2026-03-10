@@ -235,45 +235,111 @@ class ScopusHybridAPI:
                                  use_priority_terms: bool = False,
                                  max_results: int = 1000) -> Dict:
         """
-        Execute the Nechako Watershed saturation search on Scopus.
-        
+        Execute the Nechako Watershed saturation search on Scopus using chunked queries.
+
+        Splits the large location term set into chunks that fit within API
+        limits, executes each chunk, and merges the deduplicated results.
+
         Args:
             date_start (str): Start year (YYYY or YYYY-MM-DD)
             date_end (str): End year (YYYY or YYYY-MM-DD)
             use_priority_terms (bool): Use priority location terms only
             max_results (int): Maximum results to retrieve
-            
+
         Returns:
             Dict: Search results
         """
-        logger.info("Starting Nechako Watershed saturation search on Scopus")
+        from utils.location_terms import REGIONAL_FILTER_TERMS
+        from utils.chunked_search import ChunkedSearchManager
+
+        logger.info("Starting Nechako Watershed saturation search on Scopus (chunked)")
         logger.info(f"Date range: {date_start} to {date_end or 'present'}")
         logger.info(f"Using {'priority' if use_priority_terms else 'comprehensive'} location terms")
-        
-        # Build the search query
-        query = self.build_nechako_query(
-            use_priority_terms=use_priority_terms,
-            date_start=date_start,
-            date_end=date_end
-        )
-        
-        # Execute the search
-        results = self.search_documents(
-            query=query,
-            max_results=max_results
-        )
-        
-        # Add search parameters to metadata
-        results['metadata'].update({
-            'search_type': 'Nechako Watershed Saturation Search (Scopus Hybrid)',
-            'date_start': date_start,
-            'date_end': date_end,
-            'use_priority_terms': use_priority_terms,
-            'max_results': max_results,
-            'database': 'Scopus'
-        })
-        
-        return results
+
+        if date_end is None:
+            date_end = str(datetime.now().year)
+        if '-' in date_start:
+            date_start = date_start.split('-')[0]
+        if '-' in date_end:
+            date_end = date_end.split('-')[0]
+
+        # Regional filter (Line 8) — shared across all chunks
+        regional_parts = " OR ".join([f'"{t}"' for t in REGIONAL_FILTER_TERMS])
+        regional_filter = f'ALL({regional_parts})'
+
+        # Date + language + doctype filters
+        filters = [
+            regional_filter,
+            f"PUBYEAR > {int(date_start)-1} AND PUBYEAR < {int(date_end)+1}",
+        ]
+        if DEFAULT_LANGUAGE and DEFAULT_LANGUAGE.lower() == "english":
+            filters.append('LANGUAGE(english)')
+        filters.append('DOCTYPE(ar OR re OR cp OR ch)')
+        filter_clause = " AND ".join(filters)
+
+        # Build chunked queries for location terms
+        chunker = ChunkedSearchManager(api_type="scopus", max_chunk_size=50)
+        chunked_queries = chunker.build_chunked_queries(use_priority_terms)
+
+        all_records = []
+        seen_eids = set()
+        total_available = 0
+
+        logger.info(f"Executing {len(chunked_queries)} chunked queries")
+
+        for chunk_id, location_chunk_query, terms in chunked_queries:
+            # Convert chunk terms to Scopus TITLE-ABS-KEY format
+            term_list = [t.strip('"') for t in location_chunk_query.split(' OR ')]
+            scopus_terms = " OR ".join([f'TITLE-ABS-KEY("{t}")' for t in term_list])
+
+            query = f"({scopus_terms}) AND {filter_clause}"
+
+            logger.info(f"Chunk {chunk_id}: {len(terms)} terms, "
+                       f"query length {len(query)} chars")
+
+            try:
+                chunk_results = self.search_documents(
+                    query=query,
+                    max_results=max_results
+                )
+
+                chunk_total = chunk_results.get('total_results', 0)
+                total_available += chunk_total
+
+                for record in chunk_results.get('records', []):
+                    eid = record.get('eid', '')
+                    if eid and eid not in seen_eids:
+                        seen_eids.add(eid)
+                        all_records.append(record)
+                    elif not eid:
+                        all_records.append(record)
+
+                logger.info(f"Chunk {chunk_id}: {chunk_total} available, "
+                           f"{len(chunk_results.get('records', []))} retrieved")
+
+            except Exception as e:
+                logger.error(f"Chunk {chunk_id} failed: {e}")
+
+        logger.info(f"Total: {len(all_records)} unique records from "
+                   f"{len(chunked_queries)} chunks")
+
+        return {
+            'records': all_records,
+            'metadata': {
+                'search_type': 'Nechako Watershed Saturation Search (Scopus Hybrid)',
+                'date_start': date_start,
+                'date_end': date_end,
+                'use_priority_terms': use_priority_terms,
+                'max_results': max_results,
+                'database': 'Scopus',
+                'search_time': datetime.now().isoformat(),
+                'total_results': total_available,
+                'retrieved_results': len(all_records),
+                'chunks_executed': len(chunked_queries),
+            },
+            'total_results': total_available,
+            'retrieved_results': len(all_records)
+        }
     
     def _convert_entry_to_standard_format(self, entry: Dict) -> Dict:
         """

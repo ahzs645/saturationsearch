@@ -108,8 +108,12 @@ class WebOfScienceStarterAPI:
         # Line 7: All specific geographic terms as Topic Search
         location_query = build_comprehensive_location_query(use_priority_terms)
 
-        # Line 8: Regional filter in ALL fields (no TS= prefix)
-        regional_filter = " OR ".join([f'"{term}"' for term in REGIONAL_FILTER_TERMS])
+        # Line 8: Regional filter — ideally all fields, but WoS Starter API
+        # requires field tags. Using TS + OG (Organization) to approximate
+        # Terry's all-fields search. This catches terms in title/abstract/keywords
+        # and in institutional affiliations.
+        regional_parts = " OR ".join([f'"{term}"' for term in REGIONAL_FILTER_TERMS])
+        regional_filter = f'TS=({regional_parts}) OR OG=({regional_parts})'
 
         # Line 9: Combine Line 7 AND Line 8 + date/language filters
         query_parts = [
@@ -231,50 +235,107 @@ class WebOfScienceStarterAPI:
         }
     
     def nechako_saturation_search(self,
-                                 date_start: str = "1930-01-01", 
+                                 date_start: str = "1930-01-01",
                                  date_end: Optional[str] = None,
                                  use_priority_terms: bool = False,
                                  max_results: int = 1000) -> Dict:
         """
-        Execute the Nechako Watershed saturation search.
-        
+        Execute the Nechako Watershed saturation search using chunked queries.
+
+        Splits the large location term set into chunks that fit within API
+        limits, executes each chunk, and merges the deduplicated results.
+
         Args:
             date_start (str): Start date (YYYY-MM-DD)
             date_end (str): End date (YYYY-MM-DD)
             use_priority_terms (bool): Use priority location terms only
             max_results (int): Maximum results to retrieve
-            
+
         Returns:
             Dict: Search results
         """
-        logger.info("Starting Nechako Watershed saturation search")
+        from utils.location_terms import REGIONAL_FILTER_TERMS
+        from utils.chunked_search import ChunkedSearchManager
+
+        logger.info("Starting Nechako Watershed saturation search (chunked)")
         logger.info(f"Date range: {date_start} to {date_end or 'present'}")
         logger.info(f"Using {'priority' if use_priority_terms else 'comprehensive'} location terms")
-        
-        # Build the search query
-        query = self.build_nechako_query(
-            use_priority_terms=use_priority_terms,
-            date_start=date_start,
-            date_end=date_end
-        )
-        
-        # Execute the search
-        results = self.search_documents(
-            query=query,
-            max_results=max_results,
-            database="WOS"
-        )
-        
-        # Add search parameters to metadata
-        results['metadata'].update({
-            'search_type': 'Nechako Watershed Saturation Search',
-            'date_start': date_start,
-            'date_end': date_end,
-            'use_priority_terms': use_priority_terms,
-            'max_results': max_results
-        })
-        
-        return results
+
+        if date_end is None:
+            date_end_year = str(datetime.now().year)
+        else:
+            date_end_year = date_end.split('-')[0]
+        date_start_year = date_start.split('-')[0]
+
+        # Regional filter (Line 8) — shared across all chunks
+        regional_parts = " OR ".join([f'"{t}"' for t in REGIONAL_FILTER_TERMS])
+        regional_filter = f'TS=({regional_parts}) OR OG=({regional_parts})'
+
+        # Date + language filters
+        filters = [f"({regional_filter})", f"PY=({date_start_year}-{date_end_year})"]
+        if DEFAULT_LANGUAGE and DEFAULT_LANGUAGE.lower() == "english":
+            filters.append("LA=(English)")
+        filter_clause = " AND ".join(filters)
+
+        # Build chunked queries for location terms
+        chunker = ChunkedSearchManager(api_type="wos", max_chunk_size=50)
+        chunked_queries = chunker.build_chunked_queries(use_priority_terms)
+
+        all_records = []
+        seen_uids = set()
+        total_available = 0
+
+        logger.info(f"Executing {len(chunked_queries)} chunked queries")
+
+        for chunk_id, location_chunk_query, terms in chunked_queries:
+            query = f"TS=({location_chunk_query}) AND {filter_clause}"
+
+            logger.info(f"Chunk {chunk_id}: {len(terms)} terms, "
+                       f"query length {len(query)} chars")
+
+            try:
+                chunk_results = self.search_documents(
+                    query=query,
+                    max_results=max_results,
+                    database="WOS"
+                )
+
+                chunk_total = chunk_results.get('total_results', 0)
+                total_available += chunk_total
+
+                for record in chunk_results.get('records', []):
+                    uid = record.get('uid', '')
+                    if uid and uid not in seen_uids:
+                        seen_uids.add(uid)
+                        all_records.append(record)
+                    elif not uid:
+                        all_records.append(record)
+
+                logger.info(f"Chunk {chunk_id}: {chunk_total} available, "
+                           f"{len(chunk_results.get('records', []))} retrieved")
+
+            except Exception as e:
+                logger.error(f"Chunk {chunk_id} failed: {e}")
+
+        logger.info(f"Total: {len(all_records)} unique records from "
+                   f"{len(chunked_queries)} chunks")
+
+        return {
+            'records': all_records,
+            'metadata': {
+                'search_type': 'Nechako Watershed Saturation Search',
+                'date_start': date_start,
+                'date_end': date_end,
+                'use_priority_terms': use_priority_terms,
+                'max_results': max_results,
+                'search_time': datetime.now().isoformat(),
+                'total_results': total_available,
+                'retrieved_results': len(all_records),
+                'chunks_executed': len(chunked_queries),
+            },
+            'total_results': total_available,
+            'retrieved_results': len(all_records)
+        }
     
     def _convert_document_to_standard_format(self, doc) -> Dict:
         """

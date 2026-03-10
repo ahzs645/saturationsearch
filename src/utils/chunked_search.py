@@ -57,19 +57,15 @@ class ChunkedSearchManager:
             categories_to_use = ENHANCED_NECHAKO_LOCATION_TERMS
             
         for category, terms in categories_to_use.items():
-            # Generate variants for terms to get realistic query size
+            # Generate accent variants only — watercourse variants are disabled
+            # to match Terry's original search which uses exact names only.
             expanded_terms = []
             for term in terms:
                 expanded_terms.append(term)
-                # Add accent variants
+                # Add accent variants (for François Lake, Hautête Lake, etc.)
                 for variant in generate_accent_variants(term):
                     if variant != term and variant not in expanded_terms:
                         expanded_terms.append(variant)
-                # Add watercourse variants for relevant terms
-                if any(suffix in term.lower() for suffix in ["creek", "river", "brook", "stream"]):
-                    for variant in generate_watercourse_variants(term):
-                        if variant != term and variant not in expanded_terms:
-                            expanded_terms.append(variant)
             
             # Chunk terms within the category
             category_chunks = self._chunk_terms_list(expanded_terms)
